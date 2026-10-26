@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f5ef">
+  <meta name="description" content="CadeauSamen — houd cadeautjes geheim en voorkom dubbele cadeaus.">
+  <title>CadeauSamen — samen iets leuks geven</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="CadeauSamen startpagina"><span class="brand-mark">✳</span> CadeauSamen</a>
+    <span class="top-note">Kleine verrassingen, geen dubbele cadeaus</span>
+  </header>
+  <main>
+    <section class="hero">
+      <div class="eyebrow"><span></span> ALLE CADEAUS OP ÉÉN PLEK</div>
+      <h1>Geef iets leuks.<br><em>Houd het geheim.</em></h1>
+      <p class="intro">Maak een verlanglijstje, deel het met je familie en stem cadeaus af zonder de verrassing te verklappen.</p>
+      <div class="hero-art" aria-hidden="true"><div class="sun"></div><div class="gift gift-a"><i></i></div><div class="gift gift-b"><i></i></div><div class="spark s1">✦</div><div class="spark s2">✳</div><div class="spark s3">✧</div></div>
+    </section>
+    <section class="panels" aria-label="Kies wat je wilt doen">
+      <article class="panel">
+        <div class="panel-icon">＋</div>
+        <p class="kicker">JOUW LIJSTJE</p>
+        <h2>Maak een lijstje</h2>
+        <p>Voeg cadeau-ideeën toe met prijs, link en extra uitleg. Deel daarna je lijst met familie.</p>
+        <button class="primary" id="createBtn">Nieuw lijstje maken <span>↗</span></button>
+      </article>
+      <article class="panel panel-warm">
+        <div class="panel-icon">↗</div>
+        <p class="kicker">FAMILIE & VRIENDEN</p>
+        <h2>Open een lijstje</h2>
+        <p>Heb je een deellink gekregen? Open de lijst en help voorkomen dat iemand hetzelfde koopt.</p>
+        <form id="openForm"><label for="shareLink">Plak de deellink of code</label><div class="input-row"><input id="shareLink" placeholder="Link of lijstcode" autocomplete="url" required><button class="primary arrow-btn" aria-label="Open lijst">→</button></div><p class="form-error" id="openError" role="alert"></p></form>
+      </article>
+    </section>
+    <section class="promise"><span>✦</span><p><strong>Een verrassing blijft een verrassing.</strong><br>De bedoeling is dat de maker niet kan zien wie een cadeau reserveert. Dat moet door de server worden afgeschermd, niet alleen verstopt op het scherm.</p></section>
+    <section class="setup" id="setupNote"><strong>De basis staat klaar.</strong> De online versie heeft nog een database en beveiligde reserveringsfuncties nodig voordat familie hem echt kan gebruiken. Gebruik deze versie nog niet voor echte cadeaulijsten.</section>
+  </main>
+  <footer><span>✳ CadeauSamen</span><span>Gemaakt om samen te geven, zonder spoilers.</span></footer>
+  <dialog id="infoDialog"><div class="dialog-inner"><button class="close" id="closeDialog" aria-label="Sluiten">×</button><div class="dialog-mark">✳</div><h2 id="dialogTitle">Binnenkort beschikbaar</h2><p id="dialogText">De account- en lijstfuncties worden aangesloten op een beveiligde database. Deze demo slaat geen gegevens op.</p><button class="primary" id="dialogOk">Begrepen</button></div></dialog>
+  <script src="app.js"></script>
+</body>
+</html>
