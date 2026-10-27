@@ -18,10 +18,11 @@ async function startApp() {
   const inner = dialog.querySelector('.dialog-inner');
   const createBtn = document.getElementById('createBtn');
   const topbar = document.querySelector('.topbar');
-  const status = document.createElement('p');
 
+  const status = document.createElement('p');
+  status.setAttribute('role', 'status');
   status.style.cssText =
-    'text-align:center;color:#315c47;margin:16px 0;';
+    'text-align:center;color:#315c47;margin:16px;';
   document.querySelector('.panels').after(status);
 
   const loginButton = document.createElement('button');
@@ -31,12 +32,26 @@ async function startApp() {
 
   let user = null;
   let activeWishlist = null;
+  let sharedToken = new URLSearchParams(location.search).get('share');
+
+  function setStatus(message) {
+    status.textContent = message;
+  }
+
+  function safeUrl(value) {
+    try {
+      const url = new URL(value);
+      return ['https:', 'http:'].includes(url.protocol) ? url.href : null;
+    } catch {
+      return null;
+    }
+  }
 
   async function refreshUser() {
     const { data, error } = await db.auth.getSession();
 
     if (error) {
-      status.textContent = 'Account laden lukte niet.';
+      setStatus('Account laden lukte niet.');
       return;
     }
 
@@ -47,58 +62,86 @@ async function startApp() {
   function showLogin() {
     inner.innerHTML = `
       <button class="close" id="closeAuth" type="button">×</button>
-      <h2>Inloggen bij CadeauSamen</h2>
+      <h2>Welkom bij CadeauSamen</h2>
+      <p>Log in of maak een account aan om verder te gaan.</p>
+
       <form id="loginForm">
         <label for="email">E-mailadres</label>
         <input id="email" type="email" autocomplete="email" required>
 
         <label for="password">Wachtwoord</label>
         <input id="password" type="password"
-          autocomplete="current-password" required>
+          autocomplete="current-password" minlength="6" required>
 
-        <p id="error" role="alert"></p>
+        <p id="authError" role="alert"></p>
         <button class="primary" type="submit">Inloggen</button>
+        <button id="signupButton" type="button">Account aanmaken</button>
       </form>`;
 
     dialog.showModal();
     inner.querySelector('#closeAuth').onclick = () => dialog.close();
 
-    inner.querySelector('#loginForm').onsubmit = async event => {
-      event.preventDefault();
+    const form = inner.querySelector('#loginForm');
+    const errorBox = inner.querySelector('#authError');
 
-      const errorBox = inner.querySelector('#error');
+    form.onsubmit = async event => {
+      event.preventDefault();
+      errorBox.textContent = 'Even geduld...';
+
       const { error } = await db.auth.signInWithPassword({
-        email: inner.querySelector('#email').value.trim(),
-        password: inner.querySelector('#password').value
+        email: form.querySelector('#email').value.trim(),
+        password: form.querySelector('#password').value
       });
 
       if (error) {
         errorBox.textContent = error.message;
-      } else {
-        await refreshUser();
-        dialog.close();
-        await showWishlists();
+        return;
       }
+
+      await afterLogin();
+    };
+
+    inner.querySelector('#signupButton').onclick = async () => {
+      const email = form.querySelector('#email').value.trim();
+      const password = form.querySelector('#password').value;
+
+      if (!email || password.length < 6) {
+        errorBox.textContent =
+          'Vul je e-mailadres en een wachtwoord van minstens 6 tekens in.';
+        return;
+      }
+
+      errorBox.textContent = 'Account aanmaken...';
+
+      const { data, error } = await db.auth.signUp({ email, password });
+
+      if (error) {
+        errorBox.textContent = error.message;
+        return;
+      }
+
+      if (!data.session) {
+        errorBox.textContent =
+          'Controleer je mailbox om je account te bevestigen. Log daarna in.';
+        return;
+      }
+
+      await afterLogin();
     };
   }
 
-  async function showWishlists() {
-    if (!user) {
-      showLogin();
-      return;
+  async function afterLogin() {
+    await refreshUser();
+    dialog.close();
+
+    if (sharedToken) {
+      await showSharedWishlist(sharedToken);
+    } else {
+      await showWishlists();
     }
+  }
 
-    const { data: lists, error } = await db
-      .from('wishlists')
-      .select('id, title, created_at')
-      .eq('owner_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      status.textContent = 'Lijstjes laden lukte niet: ' + error.message;
-      return;
-    }
-
+  function getWishlistArea() {
     let area = document.getElementById('myWishlists');
 
     if (!area) {
@@ -109,6 +152,31 @@ async function startApp() {
       document.querySelector('.panels').after(area);
     }
 
+    return area;
+  }
+
+  async function showWishlists() {
+    if (!user) {
+      showLogin();
+      return;
+    }
+
+    sharedToken = null;
+    activeWishlist = null;
+    history.replaceState({}, '', location.pathname);
+
+    const { data: lists, error } = await db
+      .from('wishlists')
+      .select('id, title, share_token, created_at')
+      .eq('owner_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      setStatus('Lijstjes laden lukte niet: ' + error.message);
+      return;
+    }
+
+    const area = getWishlistArea();
     area.innerHTML = `
       <h2>Mijn verlanglijstjes</h2>
       <div id="myLists"></div>
@@ -121,31 +189,54 @@ async function startApp() {
       listContainer.textContent = 'Je hebt nog geen lijstjes.';
     }
 
-    lists.forEach(list => {
-      const button = document.createElement('button');
-      button.className = 'primary';
-      button.style.margin = '6px';
-      button.textContent = list.title;
-      button.onclick = () => showGifts(list);
-      listContainer.appendChild(button);
-    });
+    for (const list of lists) {
+      const row = document.createElement('div');
+      row.style.cssText =
+        'display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;';
 
-    if (activeWishlist && lists.some(list => list.id === activeWishlist.id)) {
-      await showGifts(lists.find(list => list.id === activeWishlist.id));
+      const open = document.createElement('button');
+      open.className = 'primary';
+      open.textContent = list.title;
+      open.onclick = () => showGifts(list);
+
+      const share = document.createElement('button');
+      share.textContent = 'Deel link';
+      share.onclick = async () => {
+        const link = new URL(location.pathname, location.origin);
+        link.searchParams.set('share', list.share_token);
+        const shareUrl = link.href;
+
+        try {
+          await navigator.clipboard.writeText(shareUrl);
+          setStatus('Deellink gekopieerd! Stuur hem naar je familie.');
+        } catch {
+          prompt('Kopieer deze deellink:', shareUrl);
+        }
+      };
+
+      row.append(open, share);
+      listContainer.appendChild(row);
     }
+
+    if (activeWishlist && lists.some(x => x.id === activeWishlist.id)) {
+      await showGifts(lists.find(x => x.id === activeWishlist.id));
+    }
+
+    setStatus('');
   }
 
   async function showGifts(list) {
     activeWishlist = list;
 
-    const area = document.getElementById('myWishlists');
-    if (!area) return;
-
+    const area = getWishlistArea();
     const giftArea = area.querySelector('#giftArea');
     const giftStatus = area.querySelector('#giftStatus');
 
-    giftArea.innerHTML = '<h3></h3>';
-    giftArea.querySelector('h3').textContent = list.title;
+    giftArea.replaceChildren();
+
+    const heading = document.createElement('h3');
+    heading.textContent = list.title;
+    giftArea.appendChild(heading);
 
     const addForm = document.createElement('form');
     addForm.innerHTML = `
@@ -177,22 +268,23 @@ async function startApp() {
         .order('created_at', { ascending: true });
 
       if (error) {
-        giftStatus.textContent = 'Cadeautjes laden lukte niet: ' + error.message;
+        giftStatus.textContent =
+          'Cadeautjes laden lukte niet: ' + error.message;
         return;
       }
 
-      giftList.innerHTML = '';
+      giftList.replaceChildren();
 
-      gifts.forEach(gift => {
+      for (const gift of gifts) {
         const item = document.createElement('article');
         item.className = 'panel';
         item.style.margin = '12px 0';
 
-        const heading = document.createElement('h4');
-        heading.textContent = gift.title;
-        item.appendChild(heading);
+        const title = document.createElement('h4');
+        title.textContent = gift.title;
+        item.appendChild(title);
 
-        if (gift.price !== null && gift.price !== undefined) {
+        if (gift.price != null) {
           const price = document.createElement('p');
           price.style.fontWeight = 'bold';
           price.textContent = new Intl.NumberFormat('nl-BE', {
@@ -208,9 +300,10 @@ async function startApp() {
           item.appendChild(description);
         }
 
-        if (gift.url) {
+        const url = gift.url ? safeUrl(gift.url) : null;
+        if (url) {
           const link = document.createElement('a');
-          link.href = gift.url;
+          link.href = url;
           link.target = '_blank';
           link.rel = 'noopener noreferrer';
           link.textContent = 'Bekijk cadeau';
@@ -218,7 +311,7 @@ async function startApp() {
         }
 
         giftList.appendChild(item);
-      });
+      }
     }
 
     addForm.onsubmit = async event => {
@@ -228,14 +321,18 @@ async function startApp() {
       const title = addForm.querySelector('#giftTitle').value.trim();
       const description =
         addForm.querySelector('#giftDescription').value.trim();
-      const priceText =
-        addForm.querySelector('#giftPrice').value.trim();
-      const url = addForm.querySelector('#giftUrl').value.trim();
-
+      const priceText = addForm.querySelector('#giftPrice').value.trim();
+      const urlText = addForm.querySelector('#giftUrl').value.trim();
+      const url = urlText ? safeUrl(urlText) : null;
       const price = priceText === '' ? null : Number(priceText);
 
+      if (urlText && !url) {
+        giftStatus.textContent = 'Vul een geldige http- of https-link in.';
+        return;
+      }
+
       if (price !== null && (!Number.isFinite(price) || price < 0)) {
-        giftStatus.textContent = 'Vul een geldige prijs van 0 euro of hoger in.';
+        giftStatus.textContent = 'Vul een geldige prijs in.';
         return;
       }
 
@@ -243,12 +340,13 @@ async function startApp() {
         wishlist_id: list.id,
         title,
         description: description || null,
-        url: url || null,
+        url,
         price
       });
 
       if (error) {
-        giftStatus.textContent = 'Cadeau opslaan lukte niet: ' + error.message;
+        giftStatus.textContent =
+          'Cadeau opslaan lukte niet: ' + error.message;
         return;
       }
 
@@ -260,7 +358,136 @@ async function startApp() {
     await loadGifts();
   }
 
-  loginButton.onclick = showWishlists;
+  async function showSharedWishlist(token) {
+    if (!user) {
+      showLogin();
+      return;
+    }
+
+    activeWishlist = null;
+
+    const area = getWishlistArea();
+    area.innerHTML = `
+      <h2>Gedeeld verlanglijstje</h2>
+      <p id="sharedStatus" role="status">Lijstje laden...</p>
+      <div id="sharedGifts"></div>
+      <button id="backToLists" type="button">Mijn lijstjes</button>`;
+
+    area.querySelector('#backToLists').onclick = showWishlists;
+
+    const sharedStatus = area.querySelector('#sharedStatus');
+    const giftList = area.querySelector('#sharedGifts');
+
+    async function loadShared() {
+      sharedStatus.textContent = 'Lijstje laden...';
+      giftList.replaceChildren();
+
+      const { data, error } = await db.rpc('get_shared_wishlist', {
+        p_share_token: token
+      });
+
+      if (error) {
+        sharedStatus.textContent =
+          'Het gedeelde lijstje kon niet geladen worden: ' + error.message;
+        return;
+      }
+
+      if (!data || !data.length) {
+        sharedStatus.textContent =
+          'Dit lijstje bevat nog geen cadeautjes, bestaat niet of is niet toegankelijk.';
+        return;
+      }
+
+      sharedStatus.textContent = data[0].wishlist_title;
+
+      for (const gift of data) {
+        const item = document.createElement('article');
+        item.className = 'panel';
+        item.style.margin = '12px 0';
+
+        const heading = document.createElement('h4');
+        heading.textContent = gift.gift_title;
+        item.appendChild(heading);
+
+        if (gift.gift_price != null) {
+          const price = document.createElement('p');
+          price.textContent = new Intl.NumberFormat('nl-BE', {
+            style: 'currency',
+            currency: 'EUR'
+          }).format(Number(gift.gift_price));
+          item.appendChild(price);
+        }
+
+        if (gift.gift_description) {
+          const description = document.createElement('p');
+          description.textContent = gift.gift_description;
+          item.appendChild(description);
+        }
+
+        const url = gift.gift_url ? safeUrl(gift.gift_url) : null;
+        if (url) {
+          const link = document.createElement('a');
+          link.href = url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = 'Bekijk cadeau';
+          item.appendChild(link);
+        }
+
+        const button = document.createElement('button');
+        button.className = 'primary';
+
+        if (gift.is_reserved) {
+          button.textContent = 'Al gereserveerd';
+          button.disabled = true;
+        } else {
+          button.textContent = 'Ik reserveer dit cadeau';
+          button.onclick = async () => {
+            button.disabled = true;
+            button.textContent = 'Reserveren...';
+
+            const { data: success, error: reserveError } = await db.rpc(
+              'reserve_gift',
+              {
+                p_gift_id: gift.gift_id,
+                p_share_token: token
+              }
+            );
+
+            if (reserveError) {
+              sharedStatus.textContent =
+                'Reserveren lukte niet: ' + reserveError.message;
+              button.disabled = false;
+              button.textContent = 'Ik reserveer dit cadeau';
+              return;
+            }
+
+            if (!success) {
+              sharedStatus.textContent =
+                'Dit cadeau is mogelijk net door iemand anders gereserveerd.';
+            } else {
+              sharedStatus.textContent = 'Cadeau gereserveerd!';
+            }
+
+            await loadShared();
+          };
+        }
+
+        item.appendChild(button);
+        giftList.appendChild(item);
+      }
+    }
+
+    await loadShared();
+  }
+
+  loginButton.onclick = () => {
+    if (user) {
+      showWishlists();
+    } else {
+      showLogin();
+    }
+  };
 
   createBtn.onclick = async () => {
     if (!user) {
@@ -277,26 +504,65 @@ async function startApp() {
     });
 
     if (error) {
-      status.textContent = 'Opslaan lukte niet: ' + error.message;
+      setStatus('Opslaan lukte niet: ' + error.message);
       return;
     }
 
-    status.textContent = 'Je verlanglijstje is aangemaakt!';
+    setStatus('Je verlanglijstje is aangemaakt!');
     await showWishlists();
   };
 
   document.getElementById('openForm').onsubmit = event => {
     event.preventDefault();
-    document.getElementById('openError').textContent =
-      'Gedeelde lijstjes zijn nog niet beschikbaar.';
+    const token = document.getElementById('openInput').value.trim();
+
+    if (!token) {
+      document.getElementById('openError').textContent =
+        'Vul een deelcode of gedeelde link in.';
+      return;
+    }
+
+    let shareToken = token;
+
+    try {
+      if (token.includes('://')) {
+        shareToken = new URL(token).searchParams.get('share') || '';
+      }
+    } catch {
+      shareToken = '';
+    }
+
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shareToken)) {
+      document.getElementById('openError').textContent =
+        'Dat lijkt geen geldige deellink of deelcode.';
+      return;
+    }
+
+    sharedToken = shareToken;
+    const url = new URL(location.href);
+    url.searchParams.set('share', shareToken);
+    history.replaceState({}, '', url);
+
+    if (user) {
+      showSharedWishlist(shareToken);
+    } else {
+      showLogin();
+    }
   };
 
   await refreshUser();
+
+  if (sharedToken) {
+    if (user) {
+      await showSharedWishlist(sharedToken);
+    } else {
+      showLogin();
+    }
+  }
 }
 
 startApp().catch(error => {
   console.error(error);
-
   const note = document.getElementById('setupNote');
   if (note) {
     note.textContent =
